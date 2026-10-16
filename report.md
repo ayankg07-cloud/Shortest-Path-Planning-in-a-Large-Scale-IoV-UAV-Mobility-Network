@@ -34,7 +34,7 @@ Each edge is a road segment connecting two intersections, so together the edges 
 The physical distance from `USA-road-d.NY.gr` is used here. The weight is the length of the road segment between two intersections, in the DIMACS standard unit.
 
 **9. Why the selected dataset is suitable for this problem:**
-It is a real, large, publicly available mobility network with 264,346 nodes, so it is easy to take subgraphs of different sizes for the experiments. The coordinate file helps to  compute a distance based heuristic for A*.So the results should carry over reasonably well.
+It is a real, large, publicly available mobility network with 264,346 nodes, making it easy to sample subgraphs of different sizes for scalable benchmarking. The companion coordinate file provides real GPS locations for every vertex, enabling the computation of an admissible distance-based heuristic for A*. This directly models ground-level IoV navigation and 2D waypoint routing.
 
 ---
 
@@ -57,7 +57,7 @@ It is a real, large, publicly available mobility network with 264,346 nodes, so 
 
 **1. Why is the dataset you selected suitable for shortest-path analysis?**
 
-The New York road network is a good fit for a few reasons. It is a real graph with 264,346 nodes and 733,846 edges, which is big enough for the performance differences between algorithms to show up. The structure is natural: nodes are intersections and edges have meaningful distance weights, which is close to IoV and UAV mobility scenarios. Every node also has GPS coordinates, which lets us build a heuristic for A*. Finally, it is public and in a standard format, so it was easy to parse.
+The New York road network is a strong fit for several reasons. It is a real-world graph with 264,346 nodes and 733,846 edges, providing sufficient scale for algorithmic performance differences to clearly emerge. The structure is natural: nodes represent intersections and edges have physical distance weights, which directly reflects Internet of Vehicles (IoV) ground routing and provides a representative benchmark for fixed-altitude waypoint navigation in UAV flight corridors. Furthermore, every node has geographic coordinates that allow building an admissible heuristic for A*, and the standardized DIMACS format makes parsing consistent and reproducible.
 
 ---
 
@@ -89,7 +89,7 @@ Execution time grows with graph size. For the smallest subgraph (1,000 nodes) bo
 
 **6. Explain the effect of the graph's density on shortest-path computation.**
 
-Density is basically how many edges there are compared to vertices. In a denser graph each vertex has more neighbours, so every relaxation step has more edges to check and the algorithm slows down. The New York graph has an average degree of about **5.55**, which is quite sparse, and that is normal for road networks since most intersections connect to only a few roads. Because of this, both Dijkstra and A* ran efficiently. On a very dense graph, such as a fully connected one, the number of edges to examine would blow up and both algorithms would be much slower.
+Density represents the proportion of edges relative to vertices in the graph. In a denser graph, each vertex has more outgoing neighbors, so every relaxation step checks more edges, increasing priority queue operations and overall runtime. In this New York road network, the average out-degree is about **2.78** ($E / V = 733,846 / 264,346$) and the average total degree (in-degree + out-degree) is **5.55**, which is very sparse. This sparsity is typical for physical road systems where an intersection rarely connects to more than 3 or 4 roads. Because the graph is sparse, both Dijkstra and A* execute efficiently. On a dense graph (such as a complete graph), the number of edge relaxations would grow rapidly ($O(V^2)$), substantially increasing the overhead of heap updates.
 
 ---
 
@@ -114,7 +114,7 @@ x2 = R * radians(lon_dest) * cos(ref_lat), y2 = R * radians(lat_dest)
 h(v) = 0.8 * 10 * sqrt((x2-x1)^2 + (y2-y1)^2)
 ```
 
-Where coordinates from `USA-road-d.NY.co` are in millionths of a degree (divided by 1e6 before conversion), `R = 6,371,000 m` is Earth's radius, and the factor of 10 converts metres to the DIMACS weight unit. Scaling by `0.8` ensures the heuristic stays below the true road distance.
+Where coordinates from `USA-road-d.NY.co` are in millionths of a degree (divided by 1e6 before conversion), `R = 6,371,000 m` is Earth's radius, and the factor of 10 converts metres to decimetres (the DIMACS distance unit). Scaling by `0.8` ensures the heuristic remains strictly conservative and admissible.
 
 **Admissibility:** Yes. The equirectangular formula gives the straight-line great-circle approximation, which is always ≤ the actual road distance. Multiplying by `0.8 < 1` makes it even more conservative, so `h(v) ≤ h*(v)` for every node `v` — the definition of admissibility.
 
@@ -124,17 +124,17 @@ Where coordinates from `USA-road-d.NY.co` are in millionths of a degree (divided
 
 **9. What difficulties did you face while converting the real-world dataset into a graph?**
 
-- **Understanding the file format:** I had to separate comment lines (`c`), the problem line (`p`) and the arc lines (`a`). Treating a comment as an arc would have corrupted the graph.
-- **1-based indexing:** Node IDs start from 1, not 0, so the adjacency list needed `num_vertices + 1` entries to avoid off-by-one errors.
-- **Data types for coordinates:** The coordinates are large integers like `-73530767`. With a normal `int`, squaring them in the heuristic overflowed, so I switched to `long long`.
-- **Making the heuristic admissible:** The raw Euclidean distance sometimes came out slightly larger than the actual DIMACS edge weights, probably because of rounding, unit differences between coordinates and weights, and the fact that 2D coordinates ignore road curvature. That is why I added the `0.8` scaling factor.
+- **Understanding the file format:** I had to separate comment lines (`c`), the problem configuration line (`p`), and the directed arc lines (`a`). Mistaking comment headers or metadata as arcs would corrupt graph construction.
+- **1-based indexing:** DIMACS node IDs start from 1 rather than 0, so the adjacency list and coordinate arrays required `num_vertices + 1` entries to prevent out-of-bounds indexing.
+- **Coordinate scaling and floating-point conversions:** Coordinates in the `.co` file are given as integers scaled by $10^6$ (e.g., `-73530767` represents $-73.530767^\circ$). To calculate geographic projections accurately without losing precision, they had to be parsed and scaled to `double` degrees before applying trigonometric projection equations.
+- **Guaranteeing heuristic admissibility:** Due to planar projection approximations over spherical coordinates, coordinate rounding, and discrete integer distance units, an unscaled straight-line distance could occasionally exceed the recorded edge weight on certain segments. To strictly satisfy admissibility ($h(v) \le h^*(v)$) and consistency across the entire graph, I incorporated a conservative `0.8` scaling factor.
 
 ---
 
 **10. Based on your observations, which algorithm would you recommend for large-scale IoV/UAV route planning? Justify your answer.**
 
-I would recommend **A\***, as long as the coordinates of the nodes are available.
+I would recommend **A\***, whenever geographic coordinates for network nodes or waypoints are available.
 
-In my experiments A* explored roughly **2.4x fewer vertices** than Dijkstra (e.g., 6,681 vs 16,124 at 50,000 nodes) and examined about **2.3x fewer edges** (18,854 vs 43,893), finishing faster while still returning the exact optimal path.
+In my experiments, A* explored roughly **2.4x fewer vertices** than Dijkstra (e.g., 6,681 vs 16,124 at 50,000 nodes) and examined about **2.3x fewer edges** (18,854 vs 43,893), completing substantially faster while still guaranteeing the exact optimal path.
 
-Dijkstra only makes sense when there is no positional data to build a heuristic from, since it needs nothing except the edge weights. But mobility networks almost always have geographic coordinates, so A* is the better choice in practice.
+In IoV (vehicular networks) and structured UAV mobility (fixed-corridor flight paths), nodes are fundamentally tied to geographic positions. Dijkstra expands blindly in all directions because it relies solely on cumulative edge costs. A* uses spatial coordinates to orient its search toward the destination, drastically reducing unnecessary expansions and making it the superior choice for large-scale route planning.
